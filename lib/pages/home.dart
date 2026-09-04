@@ -3,15 +3,17 @@ import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../features/home/home_logic.dart';
+import '../features/library/library_view.dart';
+import '../features/player/player_panel.dart';
+import '../features/settings/settings_page.dart';
+import '../features/theme/theme_picker_sheet.dart';
 import '../services/app_theme.dart';
 import '../services/audio_analysis.dart';
 import '../services/library_store.dart';
 import '../services/metadata.dart';
-import '../widgets/artwork.dart';
-import 'player.dart';
 
 class Home extends StatefulWidget {
   const Home({
@@ -107,31 +109,22 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   }
 
   /// Índice de la siguiente pista según aleatorio y modo de repetición.
-  /// Devuelve `null` cuando no hay siguiente (fin de la lista sin repetir).
-  int? _nextIndex() {
-    if (_tracks.isEmpty) return null;
-    if (_shuffle && _tracks.length > 1) return _randomIndex();
-    if (_selected < _tracks.length - 1) return _selected + 1;
-    if (_loopMode == LoopMode.all) return 0;
-    return null;
-  }
+  int? _nextIndex() => HomeLogic.nextIndex(
+    tracks: _tracks,
+    selected: _selected,
+    loopMode: _loopMode,
+    shuffle: _shuffle,
+    random: _random,
+  );
 
   /// Índice de la pista anterior según aleatorio y modo de repetición.
-  int? _prevIndex() {
-    if (_tracks.isEmpty) return null;
-    if (_shuffle && _tracks.length > 1) return _randomIndex();
-    if (_selected > 0) return _selected - 1;
-    if (_loopMode == LoopMode.all) return _tracks.length - 1;
-    return null;
-  }
-
-  int _randomIndex() {
-    var candidate = _selected;
-    while (candidate == _selected) {
-      candidate = _random.nextInt(_tracks.length);
-    }
-    return candidate;
-  }
+  int? _prevIndex() => HomeLogic.prevIndex(
+    tracks: _tracks,
+    selected: _selected,
+    loopMode: _loopMode,
+    shuffle: _shuffle,
+    random: _random,
+  );
 
   /// Siguiente pista: reproduce la siguiente según aleatorio/loop.
   Future<void> _seekToNext() async {
@@ -232,104 +225,30 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     if (play) await _player.play();
   }
 
-  AudioSource _sourceFor(LocalTrack track) => AudioSource.file(
-    track.path,
-    tag: MediaItem(
-      id: track.path,
-      title: track.title,
-      album: '(B)ASS',
-      artist: track.artist,
-      duration: track.duration,
-    ),
-  );
+  AudioSource _sourceFor(LocalTrack track) => HomeLogic.sourceFor(track);
 
   void _showThemePicker() {
     final currentMode = Theme.of(context).brightness == Brightness.dark
         ? ThemeMode.dark
         : ThemeMode.light;
+    final currentPreset =
+        widget.library.setting<String>(LibraryStore.themePresetKey) ??
+        AppThemePreset.purple.id;
+    final preset = AppThemePreset.values.firstWhere(
+      (entry) => entry.id == currentPreset,
+      orElse: () => AppThemePreset.purple,
+    );
 
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Tema de la aplicación',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 18),
-            SegmentedButton<ThemeMode>(
-              segments: const [
-                ButtonSegment<ThemeMode>(
-                  value: ThemeMode.light,
-                  label: Text('Claro'),
-                  icon: Icon(Icons.light_mode_rounded),
-                ),
-                ButtonSegment<ThemeMode>(
-                  value: ThemeMode.dark,
-                  label: Text('Oscuro'),
-                  icon: Icon(Icons.dark_mode_rounded),
-                ),
-              ],
-              selected: {currentMode},
-              onSelectionChanged: (selection) {
-                final mode = selection.first;
-                final preset = AppThemePreset.values.firstWhere(
-                  (entry) => entry.id ==
-                      (widget.library.setting<String>(LibraryStore.themePresetKey) ??
-                          AppThemePreset.purple.id),
-                  orElse: () => AppThemePreset.purple,
-                );
-                widget.onThemeChanged(preset, mode);
-                Navigator.pop(context);
-              },
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'Paleta',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: AppThemePreset.values.map((preset) {
-                final isActive =
-                    (widget.library.setting<String>(LibraryStore.themePresetKey) ??
-                            AppThemePreset.purple.id) ==
-                        preset.id;
-                final seed = currentMode == ThemeMode.dark
-                    ? preset.darkSeed
-                    : preset.lightSeed;
-                return InkWell(
-                  onTap: () {
-                    widget.onThemeChanged(preset, currentMode);
-                    Navigator.pop(context);
-                  },
-                  borderRadius: BorderRadius.circular(30),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: seed,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isActive
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.transparent,
-                        width: 3,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ),
+      builder: (context) => ThemePickerSheet(
+        currentMode: currentMode,
+        currentPreset: preset,
+        onThemeSelected: (selectedPreset, selectedMode) {
+          widget.onThemeChanged(selectedPreset, selectedMode);
+          Navigator.pop(context);
+        },
       ),
     );
   }
@@ -359,7 +278,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         ],
       ),
       body: _showSettings
-          ? _SettingsPage(
+          ? SettingsPage(
               shape: _artworkShape,
               visualizerMode: _visualizerMode,
               onShapeChanged: (shape) {
@@ -381,7 +300,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           : _loading
           ? const Center(child: CircularProgressIndicator())
           : _tracks.isEmpty
-          ? _EmptyLibrary(onAdd: _addTracks)
+          ? EmptyLibrary(onAdd: _addTracks)
           : Stack(
               children: [
                 // Lista de canciones.
@@ -402,7 +321,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 10),
                       ..._tracks.asMap().entries.map(
-                        (entry) => _TrackTile(
+                        (entry) => TrackTile(
                           track: entry.value,
                           selected: entry.key == _selected,
                           onTap: () => _openTrack(entry.key),
@@ -469,134 +388,3 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   }
 }
 
-class _EmptyLibrary extends StatelessWidget {
-  const _EmptyLibrary({required this.onAdd});
-  final VoidCallback onAdd;
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.graphic_eq_rounded,
-            size: 76,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'Tu música, a tu manera',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Añade archivos locales y personaliza cada portada.',
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.folder_open),
-            label: const Text('Añadir música'),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class _TrackTile extends StatelessWidget {
-  const _TrackTile({
-    required this.track,
-    required this.selected,
-    required this.onTap,
-    required this.shape,
-  });
-  final LocalTrack track;
-  final bool selected;
-  final VoidCallback onTap;
-  final ArtworkShape shape;
-  @override
-  Widget build(BuildContext context) => ListTile(
-    contentPadding: EdgeInsets.zero,
-    leading: SizedBox.square(
-      dimension: 54,
-      child: Artwork(track: track, size: 54, shape: shape),
-    ),
-    title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-    subtitle: Text(track.artist),
-    selected: selected,
-    onTap: onTap,
-  );
-}
-
-class _SettingsPage extends StatelessWidget {
-  const _SettingsPage({
-    required this.shape,
-    required this.visualizerMode,
-    required this.onShapeChanged,
-    required this.onVisualizerModeChanged,
-    required this.onThemeChanged,
-  });
-
-  final ArtworkShape shape;
-  final VisualizerMode visualizerMode;
-  final ValueChanged<ArtworkShape> onShapeChanged;
-  final ValueChanged<VisualizerMode> onVisualizerModeChanged;
-  final VoidCallback onThemeChanged;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(24),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Ajustes globales',
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-        const SizedBox(height: 24),
-        const Text('Forma de las portadas'),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          children: ArtworkShape.values
-              .map(
-                (value) => ChoiceChip(
-                  label: Text(value.name),
-                  selected: value == shape,
-                  onSelected: (_) => onShapeChanged(value),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 24),
-        const Text('Tipo de visualización'),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          children: VisualizerMode.values
-              .map(
-                (value) => ChoiceChip(
-                  label: Text(
-                    value == VisualizerMode.single
-                        ? '1 capa'
-                        : 'Múltiples capas',
-                  ),
-                  selected: value == visualizerMode,
-                  onSelected: (_) => onVisualizerModeChanged(value),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 24),
-        FilledButton.tonalIcon(
-          onPressed: onThemeChanged,
-          icon: const Icon(Icons.palette_outlined),
-          label: const Text('Tema de la aplicación'),
-        ),
-      ],
-    ),
-  );
-}

@@ -29,7 +29,14 @@ class LocalTrack {
 
 enum ArtworkShape { circle, rounded, square, diamond, triangle }
 
-enum VisualizerMode { single, multiple }
+enum VisualizerMode {
+  single,
+  multiple,
+  lineSingle,
+  lineMultiple,
+  waveformSingle,
+  waveformMultiple,
+}
 
 /// Valor de reserva mientras no se analizó el audio (determinista por archivo).
 int _estimatedBpm(int fileSize) => 90 + (fileSize % 80);

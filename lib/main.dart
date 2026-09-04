@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -16,30 +19,32 @@ Future<void> main() async {
   await JustAudioBackground.init(
     androidNotificationChannelId: 'com.example.bass.audio',
     androidNotificationChannelName: '(B)ASS',
+    androidNotificationChannelDescription: 'Controles de reproducción de música',
+    notificationColor: const Color(0xFFB77BFF),
+    androidNotificationIcon: 'mipmap/ic_launcher',
     androidNotificationOngoing: false,
     androidNotificationClickStartsActivity: true,
+    androidStopForegroundOnPause: true,
   );
+
   final dir = await getApplicationDocumentsDirectory();
   Hive.init(dir.path);
+
   final library = LibraryStore();
   final tracks = await library.load();
+
   final savedPresetId = library.setting<String>(LibraryStore.themePresetKey);
   final savedMode = library.setting<String>(LibraryStore.themeModeKey);
   final preset = AppThemePreset.values.firstWhere(
     (entry) => entry.id == savedPresetId,
     orElse: () => AppThemePreset.purple,
   );
-  final themeMode = savedMode == 'dark' ? ThemeMode.dark : ThemeMode.dark;
-  final seed = library.setting<int>(LibraryStore.seedColorKey);
+  final themeMode = savedMode == 'light' ? ThemeMode.light : ThemeMode.dark;
 
   runApp(
     MyApp(
       library: library,
       initialTracks: tracks,
-      initialSeedColor:
-          seed == null
-              ? (themeMode == ThemeMode.dark ? preset.darkSeed : preset.lightSeed)
-              : Color(seed),
       initialThemeMode: themeMode,
       initialThemePreset: preset,
       initialSelected: library.setting<int>(LibraryStore.selectedIndexKey) ?? 0,
@@ -49,7 +54,7 @@ Future<void> main() async {
       initialArtworkShape: ArtworkShape.values.firstWhere(
         (shape) =>
             shape.name == library.setting<String>(LibraryStore.artworkShapeKey),
-        orElse: () => ArtworkShape.rounded,
+        orElse: () => ArtworkShape.circle,
       ),
       initialVisualizerMode: VisualizerMode.values.firstWhere(
         (mode) =>
@@ -66,19 +71,17 @@ class MyApp extends StatefulWidget {
     super.key,
     required this.library,
     required this.initialTracks,
-    this.initialSeedColor = const Color(0xFFB47CFF),
     this.initialThemeMode = ThemeMode.dark,
     this.initialThemePreset = AppThemePreset.purple,
     this.initialSelected = 0,
     this.initialShuffle = false,
     this.initialLoopMode = 0,
-    this.initialArtworkShape = ArtworkShape.rounded,
+    this.initialArtworkShape = ArtworkShape.circle,
     this.initialVisualizerMode = VisualizerMode.single,
   });
 
   final LibraryStore library;
   final List<LocalTrack> initialTracks;
-  final Color initialSeedColor;
   final ThemeMode initialThemeMode;
   final AppThemePreset initialThemePreset;
   final int initialSelected;
@@ -91,38 +94,45 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _BassAppState();
 }
 
-class _BassAppState extends State<MyApp> {
-  late Color _seedColor;
+class _BassAppState extends State<MyApp> with WidgetsBindingObserver {
   late ThemeMode _themeMode;
   late AppThemePreset _themePreset;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _themePreset = widget.initialThemePreset;
     _themeMode = widget.initialThemeMode;
-    _seedColor = widget.initialSeedColor;
   }
 
-  ThemeData _themeFor(Brightness brightness) => AppThemePreset.buildTheme(
-    _themePreset,
-    brightness,
-  );
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      // ignore: deprecated_member_use
+      unawaited(AudioService.stop());
+    }
+  }
+
+  ThemeData _themeFor(Brightness brightness) =>
+      AppThemePreset.buildTheme(_themePreset, brightness);
 
   void _applyTheme(AppThemePreset preset, ThemeMode mode) {
     setState(() {
       _themePreset = preset;
       _themeMode = mode;
-      _seedColor = preset.seedFor(
-        mode == ThemeMode.dark ? Brightness.dark : Brightness.light,
-      );
     });
     widget.library.saveSetting(LibraryStore.themePresetKey, preset.id);
     widget.library.saveSetting(
       LibraryStore.themeModeKey,
       mode == ThemeMode.dark ? 'dark' : 'light',
     );
-    widget.library.saveSetting(LibraryStore.seedColorKey, _seedColor.toARGB32());
   }
 
   @override

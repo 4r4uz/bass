@@ -13,7 +13,8 @@ class AppThemePreset {
   final Color lightSeed;
   final Color darkSeed;
 
-  Color seedFor(Brightness brightness) => brightness == Brightness.dark ? darkSeed : lightSeed;
+  Color seedFor(Brightness brightness) =>
+      brightness == Brightness.dark ? darkSeed : lightSeed;
 
   static const blue = AppThemePreset(
     id: 'blue',
@@ -50,10 +51,7 @@ class AppThemePreset {
 
   static ThemeData buildTheme(AppThemePreset preset, Brightness brightness) {
     final seed = preset.seedFor(brightness);
-    final base = ColorScheme.fromSeed(
-      seedColor: seed,
-      brightness: brightness,
-    );
+    final base = ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
 
     final surface = brightness == Brightness.dark
         ? const Color(0xFF101114)
@@ -73,12 +71,12 @@ class AppThemePreset {
       scaffoldBackgroundColor: surface,
       appBarTheme: AppBarTheme(
         backgroundColor: surface,
-        foregroundColor: brightness == Brightness.dark ? Colors.white : Colors.black,
+        foregroundColor: brightness == Brightness.dark
+            ? Colors.white
+            : Colors.black,
       ),
       cardColor: surfaceContainer,
-      popupMenuTheme: PopupMenuThemeData(
-        color: surfaceContainer,
-      ),
+      popupMenuTheme: PopupMenuThemeData(color: surfaceContainer),
     );
   }
 }
