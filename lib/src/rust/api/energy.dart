@@ -6,6 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `compute_spectral_bands_range`, `fft_radix2`, `simple_fft_bands`
+
 /// Decodifica el audio a mono y calcula el RMS por ventanas de [`HOP`].
 ///
 /// Con `max_seconds = Some(s)` corta el análisis a los primeros `s` segundos;
@@ -24,9 +26,25 @@ Future<Envelope?> computeEnvelope({required String path, double? maxSeconds}) =>
 Future<EnergyAnalysis?> analyzeEnergy({required String path}) =>
     RustLib.instance.api.crateApiEnergyAnalyzeEnergy(path: path);
 
-/// Análisis espectral en tiempo real: extrae bandas de frecuencia.
+/// Análisis espectral completo: extrae bandas de frecuencia.
 Future<SpectralAnalysis?> analyzeSpectral({required String path}) =>
     RustLib.instance.api.crateApiEnergyAnalyzeSpectral(path: path);
+
+/// Analiza solo el fragmento [start_seconds, start_seconds + duration_seconds]
+/// del archivo y devuelve sus bandas de frecuencia.
+///
+/// Pensado para el análisis progresivo del lado Dart: se encadenan llamadas
+/// avanzando `start_seconds`, se actualiza el visualizador en vivo con cada
+/// fragmento y el resultado completo se cachea al terminar.
+Future<SpectralAnalysis?> analyzeSpectralChunk({
+  required String path,
+  required double startSeconds,
+  required double durationSeconds,
+}) => RustLib.instance.api.crateApiEnergyAnalyzeSpectralChunk(
+  path: path,
+  startSeconds: startSeconds,
+  durationSeconds: durationSeconds,
+);
 
 /// Resultado del análisis de energía, listo para la UI.
 class EnergyAnalysis {
@@ -87,24 +105,9 @@ class SpectralAnalysis {
     required this.windowsPerSecond,
   });
 
-  /// Obtiene la energía de una banda específica en una ventana.
-  double bandAt(int window, int band) {
-    if (band < 0 || band >= numBands) return 0.0;
-    final index = window * numBands + band;
-    if (index < 0 || index >= bands.length) return 0.0;
-    return bands[index];
-  }
-
-  /// Obtiene todas las bandas para una ventana.
-  Float32List bandsAt(int window) {
-    final start = window * numBands;
-    final end = start + numBands;
-    if (start < 0 || end > bands.length) return Float32List(numBands);
-    return Float32List.view(bands.buffer, start * 4, numBands);
-  }
-
   @override
-  int get hashCode => bands.hashCode ^ numBands.hashCode ^ windowsPerSecond.hashCode;
+  int get hashCode =>
+      bands.hashCode ^ numBands.hashCode ^ windowsPerSecond.hashCode;
 
   @override
   bool operator ==(Object other) =>

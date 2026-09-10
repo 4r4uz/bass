@@ -68,7 +68,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1232306706;
+  int get rustContentHash => 271341117;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -82,7 +82,15 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 abstract class RustLibApi extends BaseApi {
   Future<EnergyAnalysis?> crateApiEnergyAnalyzeEnergy({required String path});
 
-  Future<SpectralAnalysis?> crateApiEnergyAnalyzeSpectral({required String path});
+  Future<SpectralAnalysis?> crateApiEnergyAnalyzeSpectral({
+    required String path,
+  });
+
+  Future<SpectralAnalysis?> crateApiEnergyAnalyzeSpectralChunk({
+    required String path,
+    required double startSeconds,
+    required double durationSeconds,
+  });
 
   Future<Envelope?> crateApiEnergyComputeEnvelope({
     required String path,
@@ -133,7 +141,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "analyze_energy", argNames: ["path"]);
 
   @override
-  Future<SpectralAnalysis?> crateApiEnergyAnalyzeSpectral({required String path}) {
+  Future<SpectralAnalysis?> crateApiEnergyAnalyzeSpectral({
+    required String path,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -161,6 +171,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "analyze_spectral", argNames: ["path"]);
 
   @override
+  Future<SpectralAnalysis?> crateApiEnergyAnalyzeSpectralChunk({
+    required String path,
+    required double startSeconds,
+    required double durationSeconds,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          sse_encode_f_64(startSeconds, serializer);
+          sse_encode_f_64(durationSeconds, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_spectral_analysis,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiEnergyAnalyzeSpectralChunkConstMeta,
+        argValues: [path, startSeconds, durationSeconds],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEnergyAnalyzeSpectralChunkConstMeta =>
+      const TaskConstMeta(
+        debugName: "analyze_spectral_chunk",
+        argNames: ["path", "startSeconds", "durationSeconds"],
+      );
+
+  @override
   Future<Envelope?> crateApiEnergyComputeEnvelope({
     required String path,
     double? maxSeconds,
@@ -174,7 +221,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 4,
             port: port_,
           );
         },
@@ -205,7 +252,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 5,
             port: port_,
           );
         },
@@ -230,7 +277,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(name, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 4)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -255,7 +302,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 7,
             port: port_,
           );
         },
@@ -295,6 +342,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   double dco_decode_box_autoadd_f_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as double;
+  }
+
+  @protected
+  SpectralAnalysis dco_decode_box_autoadd_spectral_analysis(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_spectral_analysis(raw);
   }
 
   @protected
@@ -370,9 +423,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SpectralAnalysis? dco_decode_opt_box_autoadd_spectral_analysis(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_spectral_analysis(raw);
+  }
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
+  }
+
+  @protected
+  SpectralAnalysis dco_decode_spectral_analysis(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return SpectralAnalysis(
+      bands: dco_decode_list_prim_f_32_strict(arr[0]),
+      numBands: dco_decode_u_32(arr[1]),
+      windowsPerSecond: dco_decode_f_64(arr[2]),
+    );
   }
 
   @protected
@@ -415,14 +487,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  SpectralAnalysis sse_decode_box_autoadd_spectral_analysis(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_spectral_analysis(deserializer));
-  }
-
-  @protected
   Envelope sse_decode_box_autoadd_envelope(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_envelope(deserializer));
@@ -432,6 +496,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_f_64(deserializer));
+  }
+
+  @protected
+  SpectralAnalysis sse_decode_box_autoadd_spectral_analysis(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_spectral_analysis(deserializer));
   }
 
   @protected
@@ -447,19 +519,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_windowsPerSecond = sse_decode_f_64(deserializer);
     return EnergyAnalysis(
       windows: var_windows,
-      windowsPerSecond: var_windowsPerSecond,
-    );
-  }
-
-  @protected
-  SpectralAnalysis sse_decode_spectral_analysis(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_bands = sse_decode_list_prim_f_32_strict(deserializer);
-    var var_numBands = sse_decode_u_32(deserializer);
-    var var_windowsPerSecond = sse_decode_f_64(deserializer);
-    return SpectralAnalysis(
-      bands: var_bands,
-      numBands: var_numBands,
       windowsPerSecond: var_windowsPerSecond,
     );
   }
@@ -512,19 +571,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  SpectralAnalysis? sse_decode_opt_box_autoadd_spectral_analysis(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    if (sse_decode_bool(deserializer)) {
-      return (sse_decode_box_autoadd_spectral_analysis(deserializer));
-    } else {
-      return null;
-    }
-  }
-
-  @protected
   Envelope? sse_decode_opt_box_autoadd_envelope(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -547,6 +593,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SpectralAnalysis? sse_decode_opt_box_autoadd_spectral_analysis(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_spectral_analysis(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -555,6 +614,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     } else {
       return null;
     }
+  }
+
+  @protected
+  SpectralAnalysis sse_decode_spectral_analysis(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_bands = sse_decode_list_prim_f_32_strict(deserializer);
+    var var_numBands = sse_decode_u_32(deserializer);
+    var var_windowsPerSecond = sse_decode_f_64(deserializer);
+    return SpectralAnalysis(
+      bands: var_bands,
+      numBands: var_numBands,
+      windowsPerSecond: var_windowsPerSecond,
+    );
   }
 
   @protected
@@ -623,6 +695,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_spectral_analysis(
+    SpectralAnalysis self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_spectral_analysis(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_32(self, serializer);
@@ -635,17 +716,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_f_32_strict(self.windows, serializer);
-    sse_encode_f_64(self.windowsPerSecond, serializer);
-  }
-
-  @protected
-  void sse_encode_spectral_analysis(
-    SpectralAnalysis self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_list_prim_f_32_strict(self.bands, serializer);
-    sse_encode_u_32(self.numBands, serializer);
     sse_encode_f_64(self.windowsPerSecond, serializer);
   }
 
@@ -725,6 +795,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_spectral_analysis(
+    SpectralAnalysis? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_spectral_analysis(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -732,6 +815,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_box_autoadd_u_32(self, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_spectral_analysis(
+    SpectralAnalysis self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_prim_f_32_strict(self.bands, serializer);
+    sse_encode_u_32(self.numBands, serializer);
+    sse_encode_f_64(self.windowsPerSecond, serializer);
   }
 
   @protected

@@ -145,10 +145,18 @@ pub fn analyze_energy(path: String) -> Option<EnergyAnalysis> {
     })
 }
 
-/// Realiza FFT por ventana y extrae energía de [SPECTRAL_BANDS] bandas.
-/// Las bandas se espacian logarítmicamente: graves en primeras bandas,
-/// agudos en últimas.
-pub fn compute_spectral_bands(path: &str) -> Option<SpectralAnalysis> {
+/// Realiza FFT por ventana y extrae energía de [SPECTRAL_BANDS] bandas,
+/// limitado al rango [start_seconds, start_seconds + duration_seconds]
+/// (`None` = hasta el final del archivo). Las bandas se espacian
+/// logarítmicamente: graves en primeras bandas, agudos en últimas.
+///
+/// Los frames anteriores a `start_seconds` se decodifican (ineludible con
+/// la mayoría de formatos comprimidos) pero se descartan sin FFT.
+fn compute_spectral_bands_range(
+    path: &str,
+    start_seconds: f64,
+    duration_seconds: Option<f64>,
+) -> Option<SpectralAnalysis> {
     let file = File::open(path).ok()?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -170,11 +178,16 @@ pub fn compute_spectral_bands(path: &str) -> Option<SpectralAnalysis> {
         .make(&track.codec_params, &DecoderOptions::default())
         .ok()?;
 
+    let start_frame = (start_seconds * sample_rate as f64) as usize;
+    let end_frame = duration_seconds
+        .map(|d| start_frame + (d * sample_rate as f64) as usize);
+
     let mut window: Vec<f32> = vec![0.0; HOP];
     let mut bands_data: Vec<f32> = Vec::new();
-    let mut pos = 0;
+    let mut pos = 0usize;
+    let mut frames = 0usize;
 
-    loop {
+    'outer: loop {
         let packet = match format.next_packet() {
             Ok(packet) => packet,
             Err(SymphoniaError::IoError(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
@@ -188,6 +201,15 @@ pub fn compute_spectral_bands(path: &str) -> Option<SpectralAnalysis> {
         buffer.copy_interleaved_ref(decoded);
 
         for frame in buffer.samples().chunks(channels) {
+            frames += 1;
+            if let Some(end) = end_frame {
+                if frames > end {
+                    break 'outer;
+                }
+            }
+            if frames <= start_frame {
+                continue;
+            }
             let mono = frame.iter().sum::<f32>() / channels as f32;
             window[pos] = mono;
             pos += 1;
@@ -242,11 +264,16 @@ fn simple_fft_bands(samples: &[f32], sample_rate: usize) -> Vec<f32> {
         for j in bin_start..=bin_end.min(n / 2 - 1) {
             energy += real[j].powi(2) + imag[j].powi(2);
         }
-        *band = (energy / ((bin_end - bin_start).max(1) as f32)).sqrt().min(1.0);
+        *band = (energy / ((bin_end - bin_start).max(1) as f32)).sqrt();
     }
 
-    let max = bands.iter().copied().fold(0.0f32, f32::max).max(1e-6);
-    bands.iter_mut().for_each(|b| *b /= max);
+    // Escala fija (NO relativa a la ventana): dividir por el máximo de cada
+    // ventana clavaba la banda más fuerte en 1.0 SIEMPRE (visual clavado en
+    // el máximo) y destruía el nivel absoluto entre ventanas. Con escala
+    // fija + AGC por banda del lado Dart, todas las bandas reaccionan de
+    // forma comparable. 64.0 deja margen para que picos fuertes no se
+    // recorten al cachear (1 byte por valor).
+    bands.iter_mut().for_each(|b| *b = (*b / 64.0).min(1.0));
     bands
 }
 
@@ -303,10 +330,25 @@ fn fft_radix2(real: &mut [f32], imag: &mut [f32]) {
     }
 }
 
-/// Análisis espectral en tiempo real: extrae bandas de frecuencia.
+/// Análisis espectral completo: extrae bandas de frecuencia.
 #[flutter_rust_bridge::frb]
 pub fn analyze_spectral(path: String) -> Option<SpectralAnalysis> {
-    compute_spectral_bands(&path)
+    compute_spectral_bands_range(&path, 0.0, None)
+}
+
+/// Analiza solo el fragmento [start_seconds, start_seconds + duration_seconds]
+/// del archivo y devuelve sus bandas de frecuencia.
+///
+/// Pensado para el análisis progresivo del lado Dart: se encadenan llamadas
+/// avanzando `start_seconds`, se actualiza el visualizador en vivo con cada
+/// fragmento y el resultado completo se cachea al terminar.
+#[flutter_rust_bridge::frb]
+pub fn analyze_spectral_chunk(
+    path: String,
+    start_seconds: f64,
+    duration_seconds: f64,
+) -> Option<SpectralAnalysis> {
+    compute_spectral_bands_range(&path, start_seconds, Some(duration_seconds))
 }
 
 
@@ -341,6 +383,27 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spectral_chunk_limits_range() {
+        let path = std::env::temp_dir().join("bass_chunk_test.wav");
+        test_support::write_click_wav(&path, 120.0, 10);
+        let full = analyze_spectral(path.to_str().unwrap().to_string()).unwrap();
+        let chunk = analyze_spectral_chunk(
+            path.to_str().unwrap().to_string(),
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let wps = full.windows_per_second;
+        let windows = chunk.bands.len() as f64 / chunk.num_bands as f64;
+        assert!(
+            (windows - 3.0 * wps).abs() < wps,
+            "ventanas del fragmento: {windows} (esperadas ~{})",
+            3.0 * wps
+        );
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn energy_has_peaks_at_clicks() {
