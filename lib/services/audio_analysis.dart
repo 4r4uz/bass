@@ -181,6 +181,74 @@ class SpectralAudioStore {
 
   Future<Box> _openBox() => _boxFuture ??= Hive.openBox(_boxName);
 
+  /// Duración de cada fragmento del análisis progresivo (segundos).
+  static const _chunkSeconds = 12.0;
+
+  /// Análisis progresivo de la pista.
+  ///
+  /// Si ya está en caché (memoria o Hive) entrega el resultado completo por
+  /// [onPartial] una vez y no vuelve a analizar. Si no, analiza por
+  /// fragmentos desde Rust avanzando por el archivo y entrega resultados
+  /// parciales en vivo (el visualizador funciona mientras analiza); al
+  /// terminar guarda el análisis completo en caché para no repetirlo.
+  Future<SpectralAudio?> getProgressive(
+    String path,
+    void Function(SpectralAudio partial) onPartial,
+  ) async {
+    final memo = _memory[path];
+    if (memo != null) {
+      onPartial(memo);
+      return memo;
+    }
+    final box = await _openBox();
+    final raw = box.get(path);
+    if (raw is Uint8List) {
+      final cached = SpectralAudio.tryDecode(raw);
+      if (cached != null) {
+        _memory[path] = cached;
+        onPartial(cached);
+        return cached;
+      }
+    }
+    try {
+      final accumulated = <double>[];
+      double? windowsPerSecond;
+      var numBands = 0;
+      var start = 0.0;
+      while (true) {
+        final chunk = await rust.analyzeSpectralChunk(
+          path: path,
+          startSeconds: start,
+          durationSeconds: _chunkSeconds,
+        );
+        // Fragmento vacío: se llegó al final del archivo (o falló).
+        if (chunk == null || chunk.bands.isEmpty) break;
+        windowsPerSecond ??= chunk.windowsPerSecond;
+        numBands = chunk.numBands;
+        accumulated.addAll(chunk.bands);
+        onPartial(
+          SpectralAudio(
+            bands: List.of(accumulated),
+            numBands: numBands,
+            windowsPerSecond: windowsPerSecond,
+          ),
+        );
+        start += _chunkSeconds;
+      }
+      if (accumulated.isEmpty) return null;
+      final full = SpectralAudio(
+        bands: accumulated,
+        numBands: numBands,
+        windowsPerSecond: windowsPerSecond!,
+      );
+      _memory[path] = full;
+      await box.put(path, full.encode());
+      return full;
+    } on Exception {
+      return null;
+    }
+  }
+
   /// Devuelve el análisis espectral de la pista, de caché o analizándolo con Rust.
   Future<SpectralAudio?> get(String path) async {
     final memo = _memory[path];
