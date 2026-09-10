@@ -43,3 +43,19 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Claves de firma Android
+*.jks
+*.keystore
+android/key.properties
+
+# Secretos y entorno
+.env
+*.env
+
+# Archivos locales de máquina (rutas de SDK, etc.)
+android/local.properties
+
+# Binarios publicados
+*.apk
+*.aab
