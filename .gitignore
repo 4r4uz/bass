@@ -59,3 +59,5 @@ android/local.properties
 # Binarios publicados
 *.apk
 *.aab
+
+CLAUDE.md
