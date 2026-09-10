@@ -1,5 +1,5 @@
 name: bass
-description: "A new Flutter project."
+description: "(B)ass) es un reproductor de música que centre en visuales :)"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -23,7 +23,6 @@ dependencies:
   haudiotagger: ^1.2.6
   path_provider: ^2.1.6
   just_audio_background: ^0.0.1-beta.17
-  audio_service: ^0.18.19
 
 dev_dependencies:
   flutter_test:

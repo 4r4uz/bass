@@ -1,7 +1,7 @@
 import 'dart:math';
 
-import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 
 import '../../services/metadata.dart';
 
@@ -66,7 +66,6 @@ class HomeLogic {
     tag: MediaItem(
       id: track.path,
       title: track.title,
-      album: '(B)ASS',
       artist: track.artist,
       duration: track.duration,
     ),
