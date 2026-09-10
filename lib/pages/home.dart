@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
@@ -14,6 +15,7 @@ import '../services/app_theme.dart';
 import '../services/audio_analysis.dart';
 import '../services/library_store.dart';
 import '../services/metadata.dart';
+import '../services/watch_folder.dart';
 
 class Home extends StatefulWidget {
   const Home({
@@ -25,7 +27,8 @@ class Home extends StatefulWidget {
     this.initialShuffle = false,
     this.initialLoopMode = 0,
     this.initialArtworkShape = ArtworkShape.rounded,
-    this.initialVisualizerMode = VisualizerMode.single,
+    this.initialVisualizerType = VisualizerType.tentacles,
+    this.initialVisualizerLayers = VisualizerLayers.single,
   });
 
   final LibraryStore library;
@@ -35,7 +38,8 @@ class Home extends StatefulWidget {
   final bool initialShuffle;
   final int initialLoopMode;
   final ArtworkShape initialArtworkShape;
-  final VisualizerMode initialVisualizerMode;
+  final VisualizerType initialVisualizerType;
+  final VisualizerLayers initialVisualizerLayers;
 
   @override
   State<Home> createState() => _HomeState();
@@ -48,7 +52,8 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   late bool _shuffle;
   late LoopMode _loopMode;
   late ArtworkShape _artworkShape;
-  late VisualizerMode _visualizerMode;
+  late VisualizerType _visualizerType;
+  late VisualizerLayers _visualizerLayers;
   bool _showSettings = false;
   final Random _random = Random();
   bool _loading = false;
@@ -57,6 +62,12 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
   double _dragOffset = 0;
   final AudioAnalysisStore _analysisStore = AudioAnalysisStore();
   AudioAnalysis? _analysis;
+  final SpectralAudioStore _spectralStore = SpectralAudioStore();
+  SpectralAudio? _spectral;
+  String? _watchFolder;
+  FolderWatcher? _folderWatcher;
+  double _sensitivity = 1.0;
+  final Set<String> _loadingSpectral = {};
 
   LocalTrack? get _current => _tracks.isEmpty ? null : _tracks[_selected];
 
@@ -65,6 +76,22 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     final analysis = await _analysisStore.get(track.path);
     if (!mounted || _current?.path != track.path) return;
     setState(() => _analysis = analysis);
+  }
+
+  /// Carga (o analiza y cachea) las bandas espectrales de la pista.
+  ///
+  /// Progresivo: si hay caché se entrega completa; si no, Rust analiza por
+  /// fragmentos y el visualizador va recibiendo resultados en vivo.
+  Future<void> _loadSpectral(LocalTrack track) async {
+    if (!_loadingSpectral.add(track.path)) return;
+    try {
+      await _spectralStore.getProgressive(track.path, (partial) {
+        if (!mounted || _current?.path != track.path) return;
+        setState(() => _spectral = partial);
+      });
+    } finally {
+      _loadingSpectral.remove(track.path);
+    }
   }
 
   void _expandPlayer() => setState(() => _expanded = true);
@@ -88,11 +115,21 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
         : 0;
     _shuffle = widget.initialShuffle;
     _artworkShape = widget.initialArtworkShape;
-    _visualizerMode = widget.initialVisualizerMode;
+    _visualizerType = widget.initialVisualizerType;
+    _visualizerLayers = widget.initialVisualizerLayers;
     _loopMode = LoopMode.values.firstWhere(
       (mode) => mode.index == widget.initialLoopMode,
       orElse: () => LoopMode.off,
     );
+    _sensitivity = widget.library.setting<double>(
+      LibraryStore.sensitivityKey,
+    ) ??
+    1.0;
+    // Carpeta observada: escaneo inicial + observación continua.
+    _watchFolder = widget.library.setting<String>(LibraryStore.watchFolderKey);
+    if (_watchFolder != null) {
+      unawaited(_watchLibraryFolder(_watchFolder!));
+    }
     // Avanza según loop/aleatorio cuando la pista termina.
     _player.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed && mounted) {
@@ -100,10 +137,13 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       }
     });
     // Precarga la última pista seleccionada sin reproducirla.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_tracks.isNotEmpty && mounted) {
-        _player.setAudioSource(_sourceFor(_tracks[_selected]));
+        unawaited(
+          _player.setAudioSource(_sourceFor(_tracks[_selected])),
+        );
         unawaited(_loadAnalysis(_tracks[_selected]));
+        unawaited(_loadSpectral(_tracks[_selected]));
       }
     });
   }
@@ -191,8 +231,50 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     });
   }
 
+  /// Agrega las pistas nuevas de [paths], ignorando las ya presentes.
+  Future<void> _addPaths(List<String> paths) async {
+    var added = false;
+    for (final path in paths) {
+      if (_tracks.any((track) => track.path == path)) continue;
+      _tracks.add(await readLocalTrack(path));
+      added = true;
+    }
+    if (!added) return;
+    await widget.library.save(_tracks);
+    if (mounted) setState(() {});
+  }
+
+  /// Escanea la carpeta observada, importa su música y queda observándola.
+  Future<void> _watchLibraryFolder(String folder) async {
+    _folderWatcher?.stop();
+    final watcher = FolderWatcher(
+      folder: folder,
+      onChange: () => _syncWatchFolder(folder),
+    );
+    _folderWatcher = watcher;
+    await _syncWatchFolder(folder);
+    watcher.start();
+  }
+
+  /// Re-escaneo tras detectar cambios en la carpeta (importa solo lo nuevo).
+  Future<void> _syncWatchFolder(String folder) async {
+    if (!Directory(folder).existsSync()) return;
+    final files = await scanAudioFiles(folder);
+    await _addPaths(files);
+  }
+
+  /// Elige una carpeta desde ajustes y empieza a observarla.
+  Future<void> _pickWatchFolder() async {
+    final folder = await FilePicker.getDirectoryPath();
+    if (folder == null) return;
+    setState(() => _watchFolder = folder);
+    await widget.library.saveSetting(LibraryStore.watchFolderKey, folder);
+    await _watchLibraryFolder(folder);
+  }
+
   @override
   void dispose() {
+    _folderWatcher?.stop();
     _player.dispose();
     super.dispose();
   }
@@ -221,6 +303,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     setState(() => _selected = index);
     widget.library.saveSetting(LibraryStore.selectedIndexKey, index);
     unawaited(_loadAnalysis(_tracks[index]));
+    unawaited(_loadSpectral(_tracks[index]));
     await _player.setAudioSource(_sourceFor(_tracks[index]));
     if (play) await _player.play();
   }
@@ -280,7 +363,8 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
       body: _showSettings
           ? SettingsPage(
               shape: _artworkShape,
-              visualizerMode: _visualizerMode,
+              visualizerType: _visualizerType,
+              visualizerLayers: _visualizerLayers,
               onShapeChanged: (shape) {
                 setState(() => _artworkShape = shape);
                 widget.library.saveSetting(
@@ -288,13 +372,27 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                   shape.name,
                 );
               },
-              onVisualizerModeChanged: (mode) {
-                setState(() => _visualizerMode = mode);
+              onVisualizerTypeChanged: (type) {
+                setState(() => _visualizerType = type);
                 widget.library.saveSetting(
-                  LibraryStore.visualizerModeKey,
-                  mode.name,
+                  LibraryStore.visualizerTypeKey,
+                  type.name,
                 );
               },
+              onVisualizerLayersChanged: (layers) {
+                setState(() => _visualizerLayers = layers);
+                widget.library.saveSetting(
+                  LibraryStore.visualizerModeKey,
+                  layers.name,
+                );
+              },
+              sensitivity: _sensitivity,
+              onSensitivityChanged: (value) {
+                setState(() => _sensitivity = value);
+                widget.library.saveSetting(LibraryStore.sensitivityKey, value);
+              },
+              watchFolder: _watchFolder,
+              onPickWatchFolder: _pickWatchFolder,
               onThemeChanged: _showThemePicker,
             )
           : _loading
@@ -303,32 +401,40 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           ? EmptyLibrary(onAdd: _addTracks)
           : Stack(
               children: [
-                // Lista de canciones.
+                // Lista de canciones virtualizada: solo construye los tiles
+                // visibles (imprescindible con bibliotecas grandes).
                 Positioned.fill(
-                  child: ListView(
+                  child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Tu biblioteca',
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          Text('${_tracks.length} canciones'),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      ..._tracks.asMap().entries.map(
-                        (entry) => TrackTile(
-                          track: entry.value,
-                          selected: entry.key == _selected,
-                          onTap: () => _openTrack(entry.key),
-                          shape: _artworkShape,
-                        ),
-                      ),
-                    ],
+                    // +1 por la cabecera.
+                    itemCount: _tracks.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Tu biblioteca',
+                                  style: Theme.of(context).textTheme.titleLarge
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                Text('${_tracks.length} canciones'),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                        );
+                      }
+                      final i = index - 1;
+                      return TrackTile(
+                        track: _tracks[i],
+                        selected: i == _selected,
+                        onTap: () => _openTrack(i),
+                        shape: _artworkShape,
+                      );
+                    },
                   ),
                 ),
                 if (current != null) ...[
@@ -369,10 +475,13 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
                         track: current,
                         player: _player,
                         shape: _artworkShape,
-                        visualizerMode: _visualizerMode,
+                        visualizerType: _visualizerType,
+                        visualizerLayers: _visualizerLayers,
+                        sensitivity: _sensitivity,
                         shuffle: _shuffle,
                         loopMode: _loopMode,
                         analysis: _analysis,
+                        spectral: _spectral,
                         onMinimize: _minimizePlayer,
                         onPrevious: _prevIndex() == null ? null : _seekToPrev,
                         onNext: _nextIndex() == null ? null : _seekToNext,

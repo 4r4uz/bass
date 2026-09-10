@@ -29,14 +29,19 @@ class LocalTrack {
 
 enum ArtworkShape { circle, rounded, square, diamond, triangle }
 
-enum VisualizerMode {
-  single,
-  multiple,
-  lineSingle,
-  lineMultiple,
-  waveformSingle,
-  waveformMultiple,
+/// Tipos de visualizador disponibles alrededor de la portada.
+enum VisualizerType {
+  /// Tentáculos reactivos a la energía global (modulados por banda).
+  tentacles,
+
+  /// Sectores angulares fijos: cada zona del círculo pertenece siempre a la
+  /// misma banda de frecuencia (graves abajo, agudos arriba) y reacciona
+  /// de forma independiente con su propio envelope follower.
+  sectors,
 }
+
+/// Número de capas con las que se dibuja el visualizador.
+enum VisualizerLayers { single, multiple }
 
 /// Valor de reserva mientras no se analizó el audio (determinista por archivo).
 int _estimatedBpm(int fileSize) => 90 + (fileSize % 80);

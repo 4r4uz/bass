@@ -12,11 +12,14 @@ class PlayerPanel extends StatelessWidget {
     required this.track,
     required this.player,
     required this.shape,
-    required this.visualizerMode,
+    required this.visualizerType,
+    required this.visualizerLayers,
     required this.onMinimize,
     required this.shuffle,
     required this.loopMode,
     required this.analysis,
+    required this.spectral,
+    required this.sensitivity,
     this.onPrevious,
     this.onNext,
     this.onToggleShuffle,
@@ -26,11 +29,16 @@ class PlayerPanel extends StatelessWidget {
   final LocalTrack track;
   final AudioPlayer player;
   final ArtworkShape shape;
-  final VisualizerMode visualizerMode;
+  final VisualizerType visualizerType;
+  final VisualizerLayers visualizerLayers;
   final VoidCallback onMinimize;
   final bool shuffle;
   final LoopMode loopMode;
   final AudioAnalysis? analysis;
+  final SpectralAudio? spectral;
+
+  /// Multiplicador de amplitud para el visualizador.
+  final double sensitivity;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
   final VoidCallback? onToggleShuffle;
@@ -84,9 +92,12 @@ class PlayerPanel extends StatelessWidget {
                         track: track,
                         size: 180,
                         shape: shape,
-                        mode: visualizerMode,
+                        type: visualizerType,
+                        layers: visualizerLayers,
                         player: player,
                         analysis: analysis,
+                        spectral: spectral,
+                        sensitivity: sensitivity,
                       ),
                     ),
                     const SizedBox(height: 24),

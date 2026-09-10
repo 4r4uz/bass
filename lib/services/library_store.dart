@@ -15,9 +15,12 @@ class LibraryStore {
   static const themePresetKey = 'themePreset';
   static const selectedIndexKey = 'selectedIndex';
   static const visualizerModeKey = 'visualizerMode';
+  static const visualizerTypeKey = 'visualizerType';
   static const shuffleKey = 'shuffle';
   static const loopKey = 'loop';
   static const artworkShapeKey = 'artworkShape';
+  static const watchFolderKey = 'watchFolder';
+  static const sensitivityKey = 'sensitivity';
 
   Box? _box;
 
