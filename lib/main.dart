@@ -1,6 +1,3 @@
-import 'dart:async';
-
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -19,11 +16,8 @@ Future<void> main() async {
   await JustAudioBackground.init(
     androidNotificationChannelId: 'com.example.bass.audio',
     androidNotificationChannelName: '(B)ASS',
-    androidNotificationChannelDescription: 'Controles de reproducción de música',
-    notificationColor: const Color(0xFFB77BFF),
-    androidNotificationIcon: 'mipmap/ic_launcher',
-    androidNotificationOngoing: false,
-    androidNotificationClickStartsActivity: true,
+    androidNotificationOngoing: true,
+    preloadArtwork: true,
     androidStopForegroundOnPause: true,
   );
 
@@ -56,11 +50,16 @@ Future<void> main() async {
             shape.name == library.setting<String>(LibraryStore.artworkShapeKey),
         orElse: () => ArtworkShape.circle,
       ),
-      initialVisualizerMode: VisualizerMode.values.firstWhere(
-        (mode) =>
-            mode.name ==
+      initialVisualizerType: VisualizerType.values.firstWhere(
+        (type) =>
+            type.name == library.setting<String>(LibraryStore.visualizerTypeKey),
+        orElse: () => VisualizerType.tentacles,
+      ),
+      initialVisualizerLayers: VisualizerLayers.values.firstWhere(
+        (layers) =>
+            layers.name ==
             library.setting<String>(LibraryStore.visualizerModeKey),
-        orElse: () => VisualizerMode.single,
+        orElse: () => VisualizerLayers.single,
       ),
     ),
   );
@@ -77,7 +76,8 @@ class MyApp extends StatefulWidget {
     this.initialShuffle = false,
     this.initialLoopMode = 0,
     this.initialArtworkShape = ArtworkShape.circle,
-    this.initialVisualizerMode = VisualizerMode.single,
+    this.initialVisualizerType = VisualizerType.tentacles,
+    this.initialVisualizerLayers = VisualizerLayers.single,
   });
 
   final LibraryStore library;
@@ -88,36 +88,22 @@ class MyApp extends StatefulWidget {
   final bool initialShuffle;
   final int initialLoopMode;
   final ArtworkShape initialArtworkShape;
-  final VisualizerMode initialVisualizerMode;
+  final VisualizerType initialVisualizerType;
+  final VisualizerLayers initialVisualizerLayers;
 
   @override
   State<MyApp> createState() => _BassAppState();
 }
 
-class _BassAppState extends State<MyApp> with WidgetsBindingObserver {
+class _BassAppState extends State<MyApp> {
   late ThemeMode _themeMode;
   late AppThemePreset _themePreset;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _themePreset = widget.initialThemePreset;
     _themeMode = widget.initialThemeMode;
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.detached) {
-      // ignore: deprecated_member_use
-      unawaited(AudioService.stop());
-    }
   }
 
   ThemeData _themeFor(Brightness brightness) =>
@@ -149,7 +135,8 @@ class _BassAppState extends State<MyApp> with WidgetsBindingObserver {
       initialShuffle: widget.initialShuffle,
       initialLoopMode: widget.initialLoopMode,
       initialArtworkShape: widget.initialArtworkShape,
-      initialVisualizerMode: widget.initialVisualizerMode,
+      initialVisualizerType: widget.initialVisualizerType,
+      initialVisualizerLayers: widget.initialVisualizerLayers,
       onThemeChanged: _applyTheme,
     ),
   );
