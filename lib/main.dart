@@ -3,6 +3,7 @@ import 'package:hive/hive.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:just_audio/just_audio.dart' show LoopMode;
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'pages/home.dart';
 import 'services/app_theme.dart';
@@ -13,11 +14,13 @@ import 'src/rust/frb_generated.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
+
+  await Permission.notification.request();
+  
   await JustAudioBackground.init(
     androidNotificationChannelId: 'com.example.bass.audio',
     androidNotificationChannelName: '(B)ASS',
     androidNotificationOngoing: true,
-    preloadArtwork: true,
     androidStopForegroundOnPause: true,
   );
 

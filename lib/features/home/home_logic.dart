@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../services/metadata.dart';
 
@@ -61,13 +63,30 @@ class HomeLogic {
     return candidate;
   }
 
-  static AudioSource sourceFor(LocalTrack track) => AudioSource.file(
-    track.path,
-    tag: MediaItem(
-      id: track.path,
-      title: track.title,
-      artist: track.artist,
-      duration: track.duration,
-    ),
-  );
+    static Future<AudioSource> sourceFor(LocalTrack track) async {
+    Uri? artUri;
+    if (track.artwork != null) {
+      artUri = await _writeArtworkToTempFile(track);
+    }
+
+    return AudioSource.file(
+      track.path,
+      tag: MediaItem(
+        id: track.path,
+        title: track.title,
+        artist: track.artist,
+        duration: track.duration,
+        artUri: artUri,
+      ),
+    );
+  }
+
+  static Future<Uri> _writeArtworkToTempFile(LocalTrack track) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/art_${track.path.hashCode}.jpg');
+    if (!await file.exists()) {
+      await file.writeAsBytes(track.artwork!);
+    }
+    return file.uri;
+  }
 }

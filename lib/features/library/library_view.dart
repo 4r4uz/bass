@@ -4,9 +4,10 @@ import '../../services/metadata.dart';
 import '../../widgets/artwork.dart';
 
 class EmptyLibrary extends StatelessWidget {
-  const EmptyLibrary({super.key, required this.onAdd});
+  const EmptyLibrary({super.key, required this.onAdd, required this.onPickFolder});
 
   final VoidCallback onAdd;
+  final VoidCallback onPickFolder;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -27,14 +28,20 @@ class EmptyLibrary extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Añade archivos locales y personaliza cada portada.',
+            'Elige una carpeta y su música se importará sola.',
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: onAdd,
+            onPressed: onPickFolder,
             icon: const Icon(Icons.folder_open),
-            label: const Text('Añadir música'),
+            label: const Text('Abrir carpeta'),
+          ),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.audiotrack_outlined),
+            label: const Text('Añadir música suelta'),
           ),
         ],
       ),

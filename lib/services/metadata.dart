@@ -38,6 +38,11 @@ enum VisualizerType {
   /// misma banda de frecuencia (graves abajo, agudos arriba) y reacciona
   /// de forma independiente con su propio envelope follower.
   sectors,
+
+  /// Anillos concéntricos: pulsos de radio/grosor por rango de frecuencia
+  /// (graves → anillo interior, medios → medio, agudos → exterior), con
+  /// eco de kick y flash de drop.
+  rings,
 }
 
 /// Número de capas con las que se dibuja el visualizador.

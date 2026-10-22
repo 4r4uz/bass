@@ -140,7 +140,7 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_tracks.isNotEmpty && mounted) {
         unawaited(
-          _player.setAudioSource(_sourceFor(_tracks[_selected])),
+          _player.setAudioSource(await _sourceFor(_tracks[_selected])),
         );
         unawaited(_loadAnalysis(_tracks[_selected]));
         unawaited(_loadSpectral(_tracks[_selected]));
@@ -304,11 +304,11 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
     widget.library.saveSetting(LibraryStore.selectedIndexKey, index);
     unawaited(_loadAnalysis(_tracks[index]));
     unawaited(_loadSpectral(_tracks[index]));
-    await _player.setAudioSource(_sourceFor(_tracks[index]));
+    await _player.setAudioSource(await _sourceFor(_tracks[index]));
     if (play) await _player.play();
   }
 
-  AudioSource _sourceFor(LocalTrack track) => HomeLogic.sourceFor(track);
+  Future<AudioSource> _sourceFor(LocalTrack track) => HomeLogic.sourceFor(track);
 
   void _showThemePicker() {
     final currentMode = Theme.of(context).brightness == Brightness.dark
@@ -398,7 +398,10 @@ class _HomeState extends State<Home> with TickerProviderStateMixin {
           : _loading
           ? const Center(child: CircularProgressIndicator())
           : _tracks.isEmpty
-          ? EmptyLibrary(onAdd: _addTracks)
+          ? EmptyLibrary(
+              onAdd: _addTracks,
+              onPickFolder: _pickWatchFolder,
+            )
           : Stack(
               children: [
                 // Lista de canciones virtualizada: solo construye los tiles

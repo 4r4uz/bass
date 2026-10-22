@@ -61,6 +61,20 @@ class _EnergyArtworkState extends State<EnergyArtwork>
   int _quietTicks = 0;
   bool _breakdown = false;
 
+  /// Hardcore: sub sostenido con peak-hold corto (el kick distorsionado
+  /// "aprieta" en vez de picar y caer).
+  double _subLevel = 0.0;
+  int _subHold = 0;
+  double _prevSubRaw = 0.0;
+
+  /// Pulso de kick por transiente del sub: ataca al instante, decae en
+  /// ~100 ms para que cada kick a 150-200 BPM se vea por separado.
+  double _kickPulse = 0.0;
+
+  /// Pulso de drop: salto brusco de energía total, decae lento.
+  double _dropPulse = 0.0;
+  double _prevTotal = 0.0;
+
   /// Cap de 30fps: imperceptible para este contenido, mitad de trabajo.
   static const _frameInterval = Duration(milliseconds: 33);
 
@@ -89,9 +103,39 @@ class _EnergyArtworkState extends State<EnergyArtwork>
   /// nerviosos (attack y release rápidos).
   (double attack, double release) _envelopeFor(int index, int count) {
     final t = index / count;
-    if (t < 0.25) return (0.5, 0.06); // sub-bass / kick
-    if (t < 0.6) return (0.6, 0.10); // snare / medios
-    return (0.7, 0.16); // lead / agudos
+    if (t < 0.25) {
+      return (0.5, 0.06); // sub-bass / kick (base; el hold va aparte)
+    }
+    if (t < 0.6) {
+      return (0.75, 0.20); // snare / medios: nerviosos
+    }
+    return (0.7, 0.22); // lead / agudos
+  }
+
+  /// Ticks que el sub aguanta el pico antes de soltar (~4 ticks a 30fps).
+  static const _subHoldTicks = 4;
+
+  /// Aplica el peak-hold corto del sub: aguanta `_subHoldTicks` ticks en el
+  /// pico y suelta de golpe. Devuelve el nivel sostenido crudo (sin
+  /// envelope; el release lo hace el hold).
+  double _subHoldLevel(List<double> bands) {
+    final n = bands.length;
+    final subEnd = (n * 0.20).round().clamp(1, n);
+    var raw = 0.0;
+    for (var i = 0; i < subEnd; i++) {
+      raw += bands[i].clamp(0.0, 1.0).toDouble();
+    }
+    raw /= subEnd;
+    if (raw >= _subLevel) {
+      _subLevel = raw;
+      _subHold = _subHoldTicks;
+    } else if (_subHold > 0) {
+      _subHold--;
+    } else {
+      // Suelta en escalón seco en vez de decaer exponencial.
+      _subLevel = raw;
+    }
+    return _subLevel;
   }
 
   /// Normaliza las bandas para que TODAS reaccionen de forma comparable:
@@ -149,6 +193,7 @@ class _EnergyArtworkState extends State<EnergyArtwork>
       double graves = 0.0;
       double medios = 0.0;
       double agudos = 0.0;
+      double sub = 0.0;
       if (levels.isNotEmpty) {
         final n = levels.length;
         final gravesEnd = (n * 0.33).round();
@@ -160,19 +205,46 @@ class _EnergyArtworkState extends State<EnergyArtwork>
           final v = levels[i];
           if (i < gravesEnd) {
             g += v;
-          } else if (i < mediosEnd) {m += v;}
-          // ignore: curly_braces_in_flow_control_structures
-          else a += v;
+          } else if (i < mediosEnd) {
+            m += v;
+          } else {
+            a += v;
+          }
         }
+        // Sub sostenido con peak-hold: mezcla cruda del raw para no
+        // suavizar dos veces lo que ya trae envelope.
+        sub = _subHoldLevel(rawBands ?? const []);
         graves = g / gravesEnd;
         medios = m / (mediosEnd - gravesEnd);
         agudos = a / (n - mediosEnd);
       }
       final energy = levels.isEmpty
           ? widget.analysis?.energyAt(position) ?? 0.0
-          : (graves + medios + agudos) / 3;
+          : (sub + graves + medios + agudos) / 4;
       final hit = (energy - _lastEnergy * .85).clamp(0.0, 1.0);
       _lastEnergy = energy;
+      // Pulso de kick por transiente del sub crudo (no del nivel
+      // suavizado): ataca al instante y decae en ~3 ticks (~100 ms a
+      // 30fps) para separar kicks a 150-200 BPM.
+      if (levels.isNotEmpty) {
+        final kickHit = (sub - _prevSubRaw).clamp(0.0, 1.0);
+        if (kickHit > 0.12) {
+          _kickPulse = kickHit.clamp(0.0, 1.0);
+        } else {
+          _kickPulse *= 0.55;
+        }
+        _prevSubRaw = sub;
+      } else {
+        _kickPulse *= 0.55;
+      }
+      // Pulso de drop: salto brusco de energía total, decae lento.
+      final totalJump = (energy - _prevTotal).clamp(0.0, 1.0);
+      if (totalJump > 0.20 && energy > 0.35) {
+        _dropPulse = totalJump.clamp(0.0, 1.0);
+      } else {
+        _dropPulse *= 0.94;
+      }
+      _prevTotal = energy;
       // Breakdown: silencio sostenido (~2s de ticks) → modo calmado.
       _quietTicks = energy < 0.12 ? _quietTicks + 1 : 0;
       _breakdown = _quietTicks > 60;
@@ -183,8 +255,8 @@ class _EnergyArtworkState extends State<EnergyArtwork>
           shape: widget.shape,
         ),
       );
-      // Las capas (1 / múltiples) aplican al estilo tentáculos; sectores
-      // ya divide el círculo por bandas y usa una sola corona.
+      // Las capas (1 / múltiples) aplican al estilo tentáculos y anillos;
+      // sectores ya divide el círculo por bandas y usa una sola corona.
       final visualizer = switch (widget.type) {
         VisualizerType.tentacles => CustomPaint(
           isComplex: true,
@@ -202,6 +274,30 @@ class _EnergyArtworkState extends State<EnergyArtwork>
             graves: graves,
             medios: medios,
             agudos: agudos,
+            sub: sub,
+            kick: _kickPulse,
+            drop: _dropPulse,
+          ),
+          child: artworkChild,
+        ),
+        VisualizerType.rings => CustomPaint(
+          isComplex: true,
+          willChange: true,
+          painter: _RingsPainter(
+            position: position,
+            shape: widget.shape,
+            breakdown: _breakdown,
+            layers: switch (widget.layers) {
+              VisualizerLayers.single => 1,
+              VisualizerLayers.multiple => 3,
+            },
+            graves: graves,
+            medios: medios,
+            agudos: agudos,
+            sub: sub,
+            kick: _kickPulse,
+            drop: _dropPulse,
+            energy: energy,
           ),
           child: artworkChild,
         ),
@@ -213,6 +309,9 @@ class _EnergyArtworkState extends State<EnergyArtwork>
             shape: widget.shape,
             position: position,
             breakdown: _breakdown,
+            sub: sub,
+            kick: _kickPulse,
+            drop: _dropPulse,
           ),
           child: artworkChild,
         ),
@@ -239,6 +338,9 @@ class _ZonesPainter extends CustomPainter {
     required this.shape,
     required this.position,
     required this.breakdown,
+    this.sub = 0.0,
+    this.kick = 0.0,
+    this.drop = 0.0,
   });
 
   final List<double> levels;
@@ -247,6 +349,17 @@ class _ZonesPainter extends CustomPainter {
 
   /// Silencio sostenido: atenúa el color de los sectores.
   final bool breakdown;
+
+  /// Sub sostenido con peak-hold: abre los sectores de graves aunque el
+  /// promedio esté bajo (hardcore).
+  final double sub;
+
+  /// Pulso de kick por transiente: levanta los sectores de graves en cada
+  /// kick por separado.
+  final double kick;
+
+  /// Pulso de drop: abre todos los sectores al entrar el drop.
+  final double drop;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -267,16 +380,19 @@ class _ZonesPainter extends CustomPainter {
     );
 
     final fill = Paint()..style = PaintingStyle.fill;
-    // Path único reutilizado con reset por sector.
     final sectorPath = Path();
+    final openAll = (1.0 + drop * 0.45).clamp(1.0, 1.45);
     for (var i = 0; i < n; i++) {
-      final level = levels[i].clamp(0.0, 1.0);
+      var level = levels[i].clamp(0.0, 1.0);
+      if (n > 0 && i / n < 0.20) {
+        level = (level * 0.45 + sub * 0.40 + kick * 0.55).clamp(0.0, 1.0);
+      }
       final midAngle = -pi / 2 + ((i + 0.5) / n) * 2 * pi;
-      // Pequeño hueco entre zonas para que se lean como sectores.
       final a0 = -pi / 2 + (i + 0.09) / n * 2 * pi;
       final a1 = -pi / 2 + (i + 0.91) / n * 2 * pi;
       final inner = _shapeOrbitDistance(size, shape, midAngle);
-      final outer = inner + size.shortestSide * 0.02 + level * maxLen;
+      final outer =
+          inner + (size.shortestSide * 0.02 + level * maxLen) * openAll;
 
       fill.color = HSVColor.fromAHSV(
         ((0.35 + level * 0.6) * (breakdown ? 0.7 : 1.0)).clamp(0.0, 1.0),
@@ -285,7 +401,6 @@ class _ZonesPainter extends CustomPainter {
         (.6 + level * .4).clamp(0.0, 1.0),
       ).toColor();
 
-      // Sector anular entre el borde de la portada y la amplitud de la zona.
       canvas.drawPath(
         sectorPath
           ..reset()
@@ -312,7 +427,143 @@ class _ZonesPainter extends CustomPainter {
       !identical(oldDelegate.levels, levels) ||
       oldDelegate.position != position ||
       oldDelegate.shape != shape ||
-      oldDelegate.breakdown != breakdown;
+      oldDelegate.breakdown != breakdown ||
+      oldDelegate.sub != sub ||
+      oldDelegate.kick != kick ||
+      oldDelegate.drop != drop;
+}
+
+/// Painter del tipo "anillos": tres coronas concéntricas que pulsan por
+/// rango de frecuencia — graves → anillo interior, medios → medio,
+/// agudos → exterior —, distintas de tentáculos (filamentos radiales) y
+/// sectores (cuñas angulares). Sin espectro dibuja el estado base.
+///
+/// Con "1 capa" solo suena la corona interior mezclando los tres rangos;
+/// con "múltiples capas" cada corona tiene su propio rango con desfase de
+/// movimiento, eco de kick y flash de drop.
+class _RingsPainter extends CustomPainter {
+  _RingsPainter({
+    required this.position,
+    required this.shape,
+    required this.breakdown,
+    required this.layers,
+    this.graves = 0.0,
+    this.medios = 0.0,
+    this.agudos = 0.0,
+    this.sub = 0.0,
+    this.kick = 0.0,
+    this.drop = 0.0,
+    this.energy = 0.0,
+  });
+
+  final Duration position;
+  final ArtworkShape shape;
+
+  /// Silencio sostenido: atenúa todo para un look calmado.
+  final bool breakdown;
+
+  /// 1 con "1 capa" (una sola corona mezclada); 3 con "múltiples capas".
+  final int layers;
+
+  /// Energía de las primeras bandas (graves / sub-bass / kick).
+  final double graves;
+
+  /// Energía de las bandas centrales (snare / medios).
+  final double medios;
+
+  /// Energía de las bandas altas (leads / agudos).
+  final double agudos;
+
+  /// Sub sostenido con peak-hold (hardcore): abre el anillo interior.
+  final double sub;
+
+  /// Pulso de kick por transiente: eco en los anillos.
+  final double kick;
+
+  /// Pulso de drop: flash que expande las tres coronas.
+  final double drop;
+
+  /// Energía global (fallback cuando no hay espectro).
+  final double energy;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final time = position.inMilliseconds / 1000;
+    final ringPaint = Paint()..style = PaintingStyle.stroke;
+    // Apertura global: el drop expande todo, el kick late en el eco.
+    final openAll = (1.0 + drop * 0.5).clamp(1.0, 1.5);
+    for (var ring = 0; ring < layers.clamp(1, 3); ring++) {
+      // 1 capa = mezcla única; múltiples = un rango por corona.
+      final bandLevel = switch (layers) {
+        1 => (graves + medios + agudos) / 3,
+        _ => switch (ring) {
+          0 => graves,
+          1 => medios,
+          _ => agudos,
+        },
+      };
+      // Cada corona respira con desfase propio para que no se vean clavadas.
+      final breathe =
+          sin(time * (1.1 + ring * 0.35) + ring * 2.1).abs() * 0.10;
+      // Eco de kick por corona: la interior ataca al instante, las de fuera
+      // llegan con retardo (anillo interior * 1.0, medio * 0.7, exterior * 0.4).
+      final echo = switch (ring) {
+        0 => kick,
+        1 => kick * 0.7,
+        _ => kick * 0.4,
+      };
+      final level =
+          (bandLevel * 0.55 + sub * (ring == 0 ? 0.45 : 0.15) + echo * 0.6)
+              .clamp(0.0, 1.0);
+      final base = _shapeOrbitDistance(size, shape, ring * 2.1) +
+          size.shortestSide * (0.03 + ring * 0.055);
+      final radius = (base +
+              (size.shortestSide * 0.015 + level * size.shortestSide * 0.16) *
+                  openAll +
+              breathe * size.shortestSide)
+          .clamp(base, base + size.shortestSide * 0.24);
+      final dim = breakdown ? 0.55 : 1.0;
+      // Corona principal de la banda.
+      ringPaint
+        ..strokeWidth =
+            size.shortestSide * (0.020 - ring * 0.004 + level * 0.016)
+        ..color = HSVColor.fromAHSV(
+          ((0.30 + level * 0.6) * dim).clamp(0.0, 1.0),
+          (200 + ring * 40 + time * 10) % 360,
+          .85,
+          (.55 + level * .45).clamp(0.0, 1.0),
+        ).toColor();
+      canvas.drawCircle(center, radius, ringPaint);
+      // Halo tenue que sigue al kick (eco visual del transiente).
+      if (echo > 0.05 && !breakdown) {
+        ringPaint
+          ..strokeWidth = size.shortestSide * 0.005
+          ..color = Colors.white.withValues(
+            alpha: (echo * 0.5 * dim).clamp(0.0, 0.5),
+          );
+        canvas.drawCircle(
+          center,
+          radius + size.shortestSide * (0.012 + echo * 0.05),
+          ringPaint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RingsPainter oldDelegate) =>
+      oldDelegate.position != position ||
+      oldDelegate.shape != shape ||
+      oldDelegate.breakdown != breakdown ||
+      oldDelegate.layers != layers ||
+      oldDelegate.graves != graves ||
+      oldDelegate.medios != medios ||
+      oldDelegate.agudos != agudos ||
+      oldDelegate.sub != sub ||
+      oldDelegate.kick != kick ||
+      oldDelegate.drop != drop ||
+      oldDelegate.energy != energy;
 }
 
 /// Portada de una pista, recortada según la forma global elegida.
@@ -381,6 +632,9 @@ class _TentaclesPainter extends CustomPainter {
     this.graves = 0.0,
     this.medios = 0.0,
     this.agudos = 0.0,
+    this.sub = 0.0,
+    this.kick = 0.0,
+    this.drop = 0.0,
   });
 
   final double hit;
@@ -409,6 +663,16 @@ class _TentaclesPainter extends CustomPainter {
   /// Energía de las bandas altas (leads / agudos). Usada por la capa exterior;
   /// reacciona mas rapido y mas nerviosamente que las demas.
   final double agudos;
+
+  /// Sub sostenido con peak-hold (hardcore): abre aunque el nivel
+  /// suavizado esté bajo.
+  final double sub;
+
+  /// Pulso de kick por transiente: separa los kicks a tempo alto.
+  final double kick;
+
+  /// Pulso de drop: infla todo al entrar el drop.
+  final double drop;
 
   /// Configuracion por capa: desfase temporal (phase), radio extra (orbit),
   /// rotacion (spin), escala del largo (scale) y opacidad relativa (alpha).
@@ -442,17 +706,27 @@ class _TentaclesPainter extends CustomPainter {
         1 => medios,
         _ => agudos,
       };
+      // Inflado global por drop + apertura del sub sostenido (hardcore).
+      final layerBoost =
+          (1.0 + drop * 0.35) * (layerIndex == 0 ? 1.0 + sub * 0.55 : 1.0);
       for (var i = 0; i < tentacleCount; i++) {
         final angle = i * 2 * pi / tentacleCount + layer.spin;
         final seed = sin(i * 12.9898) * 43758.5453;
         final phase = (seed - seed.floor()) * 2 * pi;
-        final organicMotion = sin(layerTime * (1.3 + (i % 5) * .08) + phase);
-        final impact = (hit * (0.65 + (i % 4) * .12)).clamp(0.0, 1.0);
+        // En hardcore el gate del sub "bombea" dos veces más rápido que el
+        // movimiento orgánico normal.
+        final organicRate = 1.3 + (i % 5) * .08 + (sub + kick) * 1.3;
+        final organicMotion = sin(layerTime * organicRate + phase);
+        // El kick empuja cada golpe por separado con ataque instantáneo.
+        final impact =
+            (hit * (0.65 + (i % 4) * .12) + kick * (layerIndex == 0 ? 0.9 : 0.45))
+                .clamp(0.0, 1.0);
         // Modulación espectral: cada tentáculo responde a su banda.
         final band = bands.isEmpty ? 1.0 : bands[i % bands.length];
         final length =
             size.shortestSide *
             layer.scale *
+            layerBoost *
             (0.55 + 0.9 * band) *
             (.025 +
                 layerEnergy * (.07 + (i % 3) * .012) +
@@ -519,7 +793,10 @@ class _TentaclesPainter extends CustomPainter {
       !identical(oldDelegate.bands, bands) ||
       oldDelegate.graves != graves ||
       oldDelegate.medios != medios ||
-      oldDelegate.agudos != agudos;
+      oldDelegate.agudos != agudos ||
+      oldDelegate.sub != sub ||
+      oldDelegate.kick != kick ||
+      oldDelegate.drop != drop;
 }
 
 double _shapeOrbitDistance(Size size, ArtworkShape shape, double angle) {

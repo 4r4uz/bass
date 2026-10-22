@@ -11,13 +11,9 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use std::f32;
 
-/// Ventana de análisis: ~11,6 ms a 44,1 kHz.
 pub const HOP: usize = 512;
-
-/// Número de bandas espectrales para el visualizador.
 pub const SPECTRAL_BANDS: usize = 32;
 
-/// Análisis espectral: bandas de frecuencia por ventana.
 #[flutter_rust_bridge::frb]
 pub struct SpectralAnalysis {
     /// Energía normalizada 0–1 por banda (frecuencia) y por ventana.

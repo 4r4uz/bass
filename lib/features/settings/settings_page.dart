@@ -70,6 +70,7 @@ class SettingsPage extends StatelessWidget {
                   label: Text(switch (value) {
                     VisualizerType.tentacles => 'Tentáculos',
                     VisualizerType.sectors => 'Sectores',
+                    VisualizerType.rings => 'Anillos',
                   }),
                   selected: value == visualizerType,
                   onSelected: (_) => onVisualizerTypeChanged(value),
